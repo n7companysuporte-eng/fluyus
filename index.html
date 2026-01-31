@@ -1,0 +1,184 @@
+<script>
+/* =======================
+   CONFIG / STORAGE
+======================= */
+const DB_KEY="fluy_db";
+const SESSION_KEY="fluy_session";
+
+let db=JSON.parse(localStorage.getItem(DB_KEY))||{users:{}};
+let currentUser=localStorage.getItem(SESSION_KEY);
+let chart=null;
+
+/* =======================
+   AUTH
+======================= */
+function saveDB(){localStorage.setItem(DB_KEY,JSON.stringify(db))}
+
+function register(){
+  const u=regUser.value.trim(),p=regPass.value.trim();
+  if(!u||!p) return alert("Preencha tudo");
+  if(db.users[u]) return alert("Usuário já existe");
+
+  db.users[u]={pass:p,limit:0,data:[],xp:0};
+  saveDB();
+  alert("Conta criada com sucesso");
+  showLogin();
+}
+
+function login(){
+  const u=loginUser.value.trim(),p=loginPass.value.trim();
+  if(!db.users[u]||db.users[u].pass!==p) return alert("Login inválido");
+  currentUser=u;
+  localStorage.setItem(SESSION_KEY,u);
+  startApp();
+}
+
+function logout(){
+  localStorage.removeItem(SESSION_KEY);
+  location.reload();
+}
+
+/* =======================
+   APP START
+======================= */
+function startApp(){
+  loginBox.classList.add("hidden");
+  registerBox.classList.add("hidden");
+  app.classList.remove("hidden");
+  month.value=new Date().toISOString().slice(0,7);
+  render();
+}
+
+/* =======================
+   CORE ACTIONS
+======================= */
+function addItem(type){
+  const value=type==="income"?+incomeValue.value:+expenseValue.value;
+  const cat=type==="income"?incomeCat.value:expenseCat.value;
+  if(!value||!cat) return;
+
+  db.users[currentUser].data.push({
+    id:crypto.randomUUID(),
+    type,cat,value,
+    month:month.value,
+    date:new Date().toLocaleDateString("pt-BR")
+  });
+
+  db.users[currentUser].xp+=5;
+  saveDB();
+  render();
+}
+
+function saveLimit(){
+  db.users[currentUser].limit=+limit.value;
+  saveDB();
+  render();
+}
+
+function removeById(id){
+  if(!confirm("Remover este lançamento?")) return;
+  const u=db.users[currentUser];
+  u.data=u.data.filter(i=>i.id!==id);
+  saveDB();
+  render();
+}
+
+/* =======================
+   IA — LIMITE AUTOMÁTICO
+======================= */
+function autoLimit(data){
+  const m={};
+  data.filter(i=>i.type==="expense").forEach(i=>{
+    m[i.month]=(m[i.month]||0)+i.value;
+  });
+  const v=Object.values(m);
+  if(!v.length) return 0;
+  return Math.round((v.reduce((a,b)=>a+b,0)/v.length)*1.15);
+}
+
+/* =======================
+   RENDER
+======================= */
+function render(){
+  const u=db.users[currentUser];
+  const monthData=u.data.filter(i=>i.month===month.value);
+
+  let income=0,expense=0,cats={};
+  monthData.forEach(i=>{
+    if(i.type==="income") income+=i.value;
+    else{
+      expense+=i.value;
+      cats[i.cat]=(cats[i.cat]||0)+i.value;
+    }
+  });
+
+  balance.innerText=(income-expense).toFixed(2);
+
+  if(!u.limit){
+    const s=autoLimit(u.data);
+    if(s){u.limit=s;saveDB();}
+  }
+
+  limit.value=u.limit||"";
+  limitUse.innerText=u.limit?Math.min(100,(expense/u.limit*100)).toFixed(0)+"%":"0%";
+
+  if(chart) chart.destroy();
+  chart=new Chart(document.getElementById("chart"),{
+    type:"pie",
+    data:{
+      labels:Object.keys(cats),
+      datasets:[{data:Object.values(cats)}]
+    }
+  });
+
+  categorySummary.innerHTML="<h3 class='font-bold mt-2'>Resumo por Categoria</h3>";
+  Object.entries(cats).forEach(([c,v])=>{
+    categorySummary.innerHTML+=`
+      <li class="flex justify-between bg-gray-100 p-2 rounded">
+        <span>${c}</span><strong>R$ ${v.toFixed(2)}</strong>
+      </li>`;
+  });
+
+  categorySummary.innerHTML+=`
+    <h3 class="font-bold mt-4">Histórico Detalhado</h3>`;
+
+  monthData
+    .sort((a,b)=>new Date(b.date)-new Date(a.date))
+    .forEach(i=>{
+      categorySummary.innerHTML+=`
+      <li onclick="removeById('${i.id}')"
+          class="flex justify-between p-2 rounded cursor-pointer hover:bg-gray-200">
+        <span>${i.date} • ${i.cat} • ${i.type==="income"?"➕":"➖"}</span>
+        <strong>R$ ${i.value.toFixed(2)}</strong>
+      </li>`;
+    });
+
+  /* INSIGHTS + GAMIFICAÇÃO */
+  if(income-expense>0){
+    categorySummary.innerHTML+=`
+      <li class="bg-green-100 p-2 rounded mt-2">
+        🎉 Parabéns! Saldo positivo este mês
+      </li>`;
+  }
+
+  if(u.limit && expense/u.limit>0.8){
+    categorySummary.innerHTML+=`
+      <li class="bg-red-100 p-2 rounded mt-2">
+        ⚠️ Atenção: você já usou mais de 80% do limite
+      </li>`;
+  }
+
+  categorySummary.innerHTML+=`
+    <li class="bg-white border p-2 rounded mt-2">
+      ⭐ XP Financeiro: ${u.xp}
+    </li>`;
+}
+
+/* =======================
+   UI SWITCH
+======================= */
+function showRegister(){loginBox.classList.add("hidden");registerBox.classList.remove("hidden")}
+function showLogin(){registerBox.classList.add("hidden");loginBox.classList.remove("hidden")}
+
+if(currentUser&&db.users[currentUser]) startApp();
+</script>
